@@ -104,6 +104,12 @@ def _best_name_layout(draw, name, max_width, max_height, font_path):
     """Try the name as a single line, and (for multi-word names) every
     two-line split point. Return whichever combination lets the name
     print largest: (font_size, font, lines, line_boxes, spacing).
+
+    Ties on font size are broken in favor of the narrowest split (the
+    smallest longest-line width), which reads as more visually balanced
+    than an arbitrarily lopsided split - e.g. for "Lt Cmdr Data",
+    ["Lt Cmdr", "Data"] over ["Lt", "Cmdr Data"] when both fit equally
+    large.
     """
     candidates = [[name]]
 
@@ -112,12 +118,15 @@ def _best_name_layout(draw, name, max_width, max_height, font_path):
         candidates.append([" ".join(words[:k]), " ".join(words[k:])])
 
     best = None
+    best_width = None
     for lines in candidates:
         font_size, font, line_boxes, spacing = _fit_lines(
             draw, lines, max_width, max_height, font_path
         )
-        if best is None or font_size > best[0]:
+        width = max(b[2] - b[0] for b in line_boxes)
+        if best is None or font_size > best[0] or (font_size == best[0] and width < best_width):
             best = (font_size, font, lines, line_boxes, spacing)
+            best_width = width
 
     return best
 
