@@ -41,10 +41,14 @@ import requests
 PRINT_LABEL_SCRIPT = Path(__file__).parent / "print_label.py"
 
 
-def fetch_job(conreg_url: str, eid: int) -> dict | None:
-    """GET the next print job for this event. Returns None if there's
-    nothing to print (204 No Content)."""
-    resp = requests.get(f"{conreg_url}/api/print-jobs/{eid}/next", timeout=10)
+def fetch_job(conreg_url: str, eid: int, printer: str) -> dict | None:
+    """GET the next print job for this event/printer. Returns None if
+    there's nothing to print (204 No Content)."""
+    resp = requests.get(
+        f"{conreg_url}/api/print-jobs/{eid}/next",
+        params={"printer": printer},
+        timeout=10,
+    )
     if resp.status_code == 204:
         return None
     resp.raise_for_status()
@@ -61,7 +65,7 @@ def post_result(conreg_url: str, eid: int, job_id: str, status: str, message: st
     resp.raise_for_status()
 
 
-def print_job(job: dict, printer: str | None, no_print: bool, output_dir: Path) -> tuple[str, str]:
+def print_job(job: dict, printer: str, no_print: bool, output_dir: Path) -> tuple[str, str]:
     """Call print_label.py to render/print `job`. Returns (status, message)
     where status is "success" or "error", matching the API contract."""
     cmd = [sys.executable, str(PRINT_LABEL_SCRIPT), job["member_name"]]
@@ -80,9 +84,9 @@ def print_job(job: dict, printer: str | None, no_print: bool, output_dir: Path) 
     return ("success", output) if result.returncode == 0 else ("error", output)
 
 
-def run_once(conreg_url: str, eid: int, printer: str | None, no_print: bool, output_dir: Path) -> bool:
+def run_once(conreg_url: str, eid: int, printer: str, no_print: bool, output_dir: Path) -> bool:
     """Poll for and handle a single job. Returns True if a job was found."""
-    job = fetch_job(conreg_url, eid)
+    job = fetch_job(conreg_url, eid, printer)
     if job is None:
         return False
 
@@ -102,7 +106,11 @@ def main() -> None:
         help="Base URL of the ConReg site, e.g. https://example.org",
     )
     parser.add_argument("--eid", type=int, required=True, help="Event ID to poll jobs for")
-    parser.add_argument("--printer", help="CUPS queue name, e.g. bilbo_baggins")
+    parser.add_argument(
+        "--printer", required=True,
+        help="Printer name, e.g. \"Bilbo Baggins\". Identifies which job queue to "
+             "poll on ConReg, and (unless --no-print) doubles as the CUPS queue name.",
+    )
     parser.add_argument(
         "--no-print",
         action="store_true",
@@ -120,9 +128,6 @@ def main() -> None:
         help="Poll a single time and exit, instead of looping forever",
     )
     args = parser.parse_args()
-
-    if not args.no_print and not args.printer:
-        parser.error("--printer is required unless --no-print is set")
 
     conreg_url = args.conreg_url.rstrip("/")
 
