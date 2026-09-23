@@ -59,19 +59,40 @@ def label_filename(hint: str = "label") -> str:
     return f"label_{timestamp}_{slug}.png"
 
 
-def send_to_printer(image_path: Path, printer: str, page_size: str, copies: int = 1) -> None:
-    """Hand a pre-rendered, correctly-sized image to CUPS."""
-    cmd = [
-        "lp",
-        "-d", printer,
-        "-o", f"PageSize={page_size}",
-        "-o", "fit-to-page",
-        "-o", f"copies={copies}",
-        str(image_path),
-    ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        raise RuntimeError(f"Print failed: {result.stderr.strip()}")
+def send_to_printer(image_path: Path, printer: str | None, page_size: str, copies: int = 1) -> None:
+    """Hand a pre-rendered, correctly-sized image to CUPS, once per copy.
+
+    Deliberately not using `-o copies=N` for a single `lp` call: the Dymo
+    CUPS driver (`printer-driver-dymo`, see README.md) declares
+    `cupsManualCopies: True` in its PPD, meaning CUPS expects the
+    driver/filter to loop internally for extra copies rather than doing it
+    at the scheduler level - but this driver's filter doesn't actually
+    implement that loop, so the `copies` job option is silently accepted
+    and has no effect. Submitting one single-copy job per copy sidesteps
+    the driver entirely and works regardless of whether it ever fixes
+    this. See #3596651.
+
+    `printer` being None means a dry run (`--no-print`, or
+    `settings.suppress_printing`) - the copy loop and its console
+    messages still run exactly as they would for a real print, so a dry
+    run exercises the same "N copies" logic a real one does; only the
+    actual `lp` call is skipped, kept to this one `if`.
+    """
+    copies = max(copies, 1)
+    for copy_num in range(1, copies + 1):
+        print(f"  Printing copy {copy_num}/{copies}...")
+        if printer is None:
+            continue
+        cmd = [
+            "lp",
+            "-d", printer,
+            "-o", f"PageSize={page_size}",
+            "-o", "fit-to-page",
+            str(image_path),
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise RuntimeError(f"Print failed on copy {copy_num}/{copies}: {result.stderr.strip()}")
 
 
 def _expected_pixel_size(page_size: str) -> tuple[int, int] | None:
@@ -98,11 +119,13 @@ def rotate_and_print(
 ) -> None:
     """Decode `image_bytes` (a PNG, as rendered unrotated by ConReg),
     rotate it to match the label stock's feed orientation, save a copy
-    to `out_path`, and - if `printer` is given - send it to CUPS.
+    to `out_path`, and send it to CUPS.
 
     `printer` being None means "don't actually print" (a dry run /
-    suppressed run) - the image is still decoded, rotated, and saved,
-    just not sent to `lp`.
+    suppressed run) - passed straight through to `send_to_printer()`,
+    which still runs its per-copy loop and console messages, just
+    without the `lp` call itself. Everything up to and including that
+    loop runs the same whether this is a dry run or a real print.
     """
     img = Image.open(io.BytesIO(image_bytes))
     if rotate_degrees:
@@ -132,8 +155,7 @@ def rotate_and_print(
     out_path.parent.mkdir(parents=True, exist_ok=True)
     img.save(out_path)
 
-    if printer:
-        send_to_printer(out_path, printer, page_size, copies=copies)
+    send_to_printer(out_path, printer, page_size, copies=copies)
 
 
 def main() -> None:

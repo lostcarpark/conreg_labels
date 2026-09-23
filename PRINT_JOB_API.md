@@ -180,8 +180,11 @@ and finishes an image ConReg already rendered:
    pixels, which would mean ConReg's render and this agent's settings
    are out of sync.
 4. Unless suppressed (`--no-print`, or `settings.suppress_printing`),
-   send the rotated image to CUPS: `lp -o PageSize=<settings.page_size>
-   -o fit-to-page -o copies=<settings.copies>`.
+   send the rotated image to CUPS `settings.copies` times, one `lp -o
+   PageSize=<settings.page_size> -o fit-to-page` call per copy - not a
+   single call with `-o copies=<settings.copies>`, which the Dymo CUPS
+   driver silently ignores (see `send_to_printer()` in `print_image.py`
+   for why).
 
 See `print_image.py`'s `rotate_and_print()` — that one function is the
 entire rendering-adjacent logic left in this repo. Everything about
